@@ -1,0 +1,24 @@
+tenant_meta:
+  code: "hn"
+  country_name: "Honduras"
+  currency: "USD"
+  timezone: "America/Tegucigalpa"
+
+  governance:
+    #catalog: "${cloud.unity_catalog}"
+    schemas:
+      bronze: "bronze_hn"
+      silver: "silver_hn"
+      gold: "gold_hn"
+      quarantine: "silver_quarantine_hn"
+    # entra_groups:
+    #   data_engineers: "grp-saas-de-hn-${environment}"
+    #   analysts_readers: "grp-saas-analysts-hn-${environment}"
+    #   service_principal: "sp-saas-pipeline-hn-${environment}"
+    # secret_scope: "scope-saas-hn-${environment}"
+
+  # adls:
+  #   bronze_uri: "abfss://bronze@${cloud.storage_account}.dfs.core.windows.net/hn"
+  #   silver_uri: "abfss://silver@${cloud.storage_account}.dfs.core.windows.net/hn"
+  #   gold_uri: "abfss://gold@${cloud.storage_account}.dfs.core.windows.net/hn"
+  #   quarantine_uri: "abfss://quarantine@${cloud.storage_account}.dfs.core.windows.net/hn"

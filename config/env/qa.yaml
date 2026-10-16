@@ -1,0 +1,15 @@
+environment: qa
+
+paths:
+  bronze: "data/qa/bronze"
+  silver: "data/qa/silver"
+  gold: "data/qa/gold"
+  quarantine_root: "data/qa"
+  quality_logs: "data/qa/shared/quality_logs"
+  checkpoints: "data/qa/_checkpoints"
+
+execution:
+  fail_fast: false
+  
+quality:
+  fail_on_critical: true

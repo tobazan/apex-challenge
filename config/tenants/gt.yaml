@@ -1,0 +1,24 @@
+tenant_meta:
+  code: "gt"
+  country_name: "Guatemala"
+  currency: "USD"
+  timezone: "America/Guatemala"
+
+  governance:
+    #catalog: "${cloud.unity_catalog}"
+    schemas:
+      bronze: "bronze_gt"
+      silver: "silver_gt"
+      gold: "gold_gt"
+      quarantine: "silver_quarantine_gt"
+    # entra_groups:
+    #   data_engineers: "grp-saas-de-gt-${environment}"
+    #   analysts_readers: "grp-saas-analysts-gt-${environment}"
+    #   service_principal: "sp-saas-pipeline-gt-${environment}"
+    # sgtret_scope: "scope-saas-gt-${environment}"
+
+  # adls:
+  #   bronze_uri: "abfss://bronze@${cloud.storage_account}.dfs.core.windows.net/gt"
+  #   silver_uri: "abfss://silver@${cloud.storage_account}.dfs.core.windows.net/gt"
+  #   gold_uri: "abfss://gold@${cloud.storage_account}.dfs.core.windows.net/gt"
+  #   quarantine_uri: "abfss://quarantine@${cloud.storage_account}.dfs.core.windows.net/gt"

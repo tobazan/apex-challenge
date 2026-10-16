@@ -1,0 +1,12 @@
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.vscode/
+
+# VIRTUAL ENVIRONMENT
+.venv/
+*.egg-info/
+uv.lock
+
+# DATA
+data/

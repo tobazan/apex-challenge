@@ -1,0 +1,24 @@
+tenant_meta:
+  code: "pe"
+  country_name: "Peru"
+  currency: "USD"
+  timezone: "America/Lima"
+
+  governance:
+    #catalog: "${cloud.unity_catalog}"
+    schemas:
+      bronze: "bronze_pe"
+      silver: "silver_pe"
+      gold: "gold_pe"
+      quarantine: "silver_quarantine_pe"
+    # entra_groups:
+    #   data_engineers: "grp-saas-de-pe-${environment}"
+    #   analysts_readers: "grp-saas-analysts-pe-${environment}"
+    #   service_principal: "sp-saas-pipeline-pe-${environment}"
+    # speret_scope: "scope-saas-pe-${environment}"
+
+  # adls:
+  #   bronze_uri: "abfss://bronze@${cloud.storage_account}.dfs.core.windows.net/pe"
+  #   silver_uri: "abfss://silver@${cloud.storage_account}.dfs.core.windows.net/pe"
+  #   gold_uri: "abfss://gold@${cloud.storage_account}.dfs.core.windows.net/pe"
+  #   quarantine_uri: "abfss://quarantine@${cloud.storage_account}.dfs.core.windows.net/pe"

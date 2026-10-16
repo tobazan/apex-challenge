@@ -1,0 +1,24 @@
+tenant_meta:
+  code: "jm"
+  country_name: "Jamaica"
+  currency: "USD"
+  timezone: "America/Jamaica"
+
+  governance:
+    #catalog: "${cloud.unity_catalog}"
+    schemas:
+      bronze: "bronze_jm"
+      silver: "silver_jm"
+      gold: "gold_jm"
+      quarantine: "silver_quarantine_jm"
+    # entra_groups:
+    #   data_engineers: "grp-saas-de-jm-${environment}"
+    #   analysts_readers: "grp-saas-analysts-jm-${environment}"
+    #   service_principal: "sp-saas-pipeline-jm-${environment}"
+    # secret_scope: "scope-saas-jm-${environment}"
+
+  # adls:
+  #   bronze_uri: "abfss://bronze@${cloud.storage_account}.dfs.core.windows.net/jm"
+  #   silver_uri: "abfss://silver@${cloud.storage_account}.dfs.core.windows.net/jm"
+  #   gold_uri: "abfss://gold@${cloud.storage_account}.dfs.core.windows.net/jm"
+  #   quarantine_uri: "abfss://quarantine@${cloud.storage_account}.dfs.core.windows.net/jm"

@@ -1,0 +1,38 @@
+environment: dev
+
+paths:
+  raw_deliveries: "data/raw/deliveries"
+  raw_materials: "data/raw/materials"
+  bronze: "data/bronze"
+  silver: "data/silver"
+  gold: "data/gold"
+  quarantine_root: "data"
+  quality_logs: "data/shared/quality_logs"
+  checkpoints: "data/_checkpoints"
+
+# cloud:
+#   storage_account: "adlssaas${environment}"
+#   unity_catalog: "saas_${environment}"
+#   key_vault: "kv-saas-${environment}"
+
+execution:
+  start_date: "2025-01-01"
+  end_date: "2025-06-30"
+  tenant: "all"
+  fail_fast: false
+
+quality:
+  fail_on_critical: false
+
+registered_tenants:
+  - sv
+  - hn
+  - ec
+  - jm
+  - gt
+  - pe
+
+rules:
+  cs_to_st_factor: 20
+  routine_delivery_types: ["ZPRE", "ZVE1"]
+  bonus_delivery_types: ["Z04", "Z05"]

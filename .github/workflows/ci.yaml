@@ -1,0 +1,37 @@
+name: SAAS Data Pipeline CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17 (Required for PySpark 3.5)
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "17"
+
+      - name: Install uv and set up Python 3.11
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          python-version: "3.11"
+
+      - name: Install dependencies into .venv
+        run: |
+          uv venv .venv
+          uv pip install -e ".[dev]"
+
+      - name: Run Ruff Linter (PEP8)
+        run: uv run ruff check src/ tests/
+
+      - name: Run Unit Tests with Pytest
+        run: uv run pytest -v

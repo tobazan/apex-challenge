@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "apex-challenge"
+version = "0.1.0"
+authors = [{ name = "dev_toba@outlook.com" }]
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "pyspark==3.5.1",
+    "delta-spark==3.2.0",
+    "omegaconf==2.3.0",
+    "click==8.1.7",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "ruff",
+]
+
+[project.scripts]
+#apex-challenge = "apex-challenge.cli:main"
+
+[tool.setuptools.packages.find]
+#where = ["src"]
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+
+[tool.pytest.ini_options]
+#testpaths = ["tests"]
+#pythonpath = ["src"]

@@ -1,0 +1,24 @@
+tenant_meta:
+  code: "ec"
+  country_name: "Ecuador"
+  currency: "USD"
+  timezone: "America/Guayaquil"
+
+  governance:
+    #catalog: "${cloud.unity_catalog}"
+    schemas:
+      bronze: "bronze_ec"
+      silver: "silver_ec"
+      gold: "gold_ec"
+      quarantine: "silver_quarantine_ec"
+    # entra_groups:
+    #   data_engineers: "grp-saas-de-ec-${environment}"
+    #   analysts_readers: "grp-saas-analysts-ec-${environment}"
+    #   service_principal: "sp-saas-pipeline-ec-${environment}"
+    # secret_scope: "scope-saas-ec-${environment}"
+
+  # adls:
+  #   bronze_uri: "abfss://bronze@${cloud.storage_account}.dfs.core.windows.net/ec"
+  #   silver_uri: "abfss://silver@${cloud.storage_account}.dfs.core.windows.net/ec"
+  #   gold_uri: "abfss://gold@${cloud.storage_account}.dfs.core.windows.net/ec"
+  #   quarantine_uri: "abfss://quarantine@${cloud.storage_account}.dfs.core.windows.net/ec"
