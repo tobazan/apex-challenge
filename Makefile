@@ -22,13 +22,21 @@ fix-lint:
 test:
 	uv run pytest -v
 
+# Local full-dataset E2E test
+test-e2e:
+	uv run pytest -v -m e2e
+
 # Parameterized bronze ingestion
 run-bronze:
 	uv run saas_pipeline --env $(ENV) --tenant $(TENANT) --start-date $(START_DATE) --end-date $(END_DATE) --layer bronze
 
+# Parameterized silver transformations
+run-silver:
+	uv run saas_pipeline --env $(ENV) --tenant $(TENANT) --start-date $(START_DATE) --end-date $(END_DATE) --layer silver
+
 # Clean Delta storage outputs, checkpoints and local Spark metastores
 clean-delta:
-	rm -rf data/bronze data/silver data/gold data/shared data/_checkpoints
+	rm -rf data/bronze data/silver data/silver_quarantine data/gold data/shared data/_checkpoints
 	rm -rf data/qa data/main
 	rm -rf spark-warehouse metastore_db derby.log .spark-staging
 
