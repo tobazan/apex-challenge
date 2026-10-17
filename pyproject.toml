@@ -3,7 +3,7 @@ requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "apex-challenge"
+name = "saas_pipeline"
 version = "0.1.0"
 authors = [{ name = "dev_toba@outlook.com" }]
 requires-python = ">=3.11,<3.13"
@@ -21,10 +21,10 @@ dev = [
 ]
 
 [project.scripts]
-#apex-challenge = "apex-challenge.cli:main"
+saas_pipeline = "saas_pipeline.cli:main"
 
 [tool.setuptools.packages.find]
-#where = ["src"]
+where = ["src"]
 
 [tool.ruff]
 line-length = 120
@@ -33,5 +33,5 @@ line-length = 120
 select = ["E", "F", "I", "W"]
 
 [tool.pytest.ini_options]
-#testpaths = ["tests"]
-#pythonpath = ["src"]
+testpaths = ["tests"]
+pythonpath = ["src"]
