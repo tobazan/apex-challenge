@@ -6,7 +6,6 @@ __pycache__/
 # VIRTUAL ENVIRONMENT
 .venv/
 *.egg-info/
-uv.lock
 
 # DATA
 data/
