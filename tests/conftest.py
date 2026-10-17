@@ -1,6 +1,6 @@
 import pytest
 
-from src.saas_pipeline.spark import get_spark_session
+from saas_pipeline.spark import get_spark_session
 
 
 @pytest.fixture(scope="session")

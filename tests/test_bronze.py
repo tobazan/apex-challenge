@@ -4,8 +4,8 @@ from omegaconf import OmegaConf
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 
-from src.saas_pipeline.bronze_deliveries import ingest_deliveries_bronze
-from src.saas_pipeline.bronze_materials import ingest_materials_bronze
+from saas_pipeline.bronze_deliveries import ingest_deliveries_bronze
+from saas_pipeline.bronze_materials import ingest_materials_bronze
 
 
 def build_test_cfg(tmp_path: Path):
