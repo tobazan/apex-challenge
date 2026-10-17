@@ -25,10 +25,8 @@ jobs:
           enable-cache: true
           python-version: "3.11"
 
-      - name: Install dependencies into .venv
-        run: |
-          uv venv .venv
-          uv pip install -e ".[dev]"
+      - name: Install dependencies
+        run: uv sync --extra dev
 
       - name: Run Ruff Linter (PEP8)
         run: uv run ruff check src/ tests/
