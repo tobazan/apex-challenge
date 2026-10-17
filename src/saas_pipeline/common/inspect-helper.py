@@ -2,7 +2,7 @@ import sys
 
 from pyspark.sql import functions as F
 
-from saas_pipeline.spark import get_spark_session
+from saas_pipeline.common.spark import get_spark_session
 
 spark = get_spark_session("Medallion_Inspector")
 

@@ -6,7 +6,7 @@ from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
 from pyspark.sql.types import DecimalType, LongType
 
-from saas_pipeline.quality_log import (
+from saas_pipeline.common.quality_log import (
     QualityRule,
     build_quality_entry,
     evaluate_and_log_rules,
@@ -106,8 +106,7 @@ def split_and_enrich_deliveries(
             F.lit("INVALID_PRECIO"),
         ),
         F.when(
-            F.col("_cat_sku").isNull()
-            | (F.col("_parsed_date").isNotNull() & F.col("_dim_material").isNull()),
+            F.col("_cat_sku").isNull() | (F.col("_parsed_date").isNotNull() & F.col("_dim_material").isNull()),
             F.lit("UNMAPPED_MATERIAL"),
         ),
     )

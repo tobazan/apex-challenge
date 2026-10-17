@@ -6,7 +6,7 @@ from pyspark.sql import DataFrame, SparkSession, Window
 from pyspark.sql import functions as F
 from pyspark.sql.types import DecimalType
 
-from saas_pipeline.quality_log import QualityRule, build_quality_entry, evaluate_and_log_rules
+from saas_pipeline.common.quality_log import QualityRule, build_quality_entry, evaluate_and_log_rules
 
 
 def transform_silver_materials(bronze_mat_df: DataFrame) -> tuple[DataFrame, DataFrame]:
@@ -96,12 +96,7 @@ def merge_dim_materials(
     # Quarantine if any corrupt catalog records exist
     quarantine_path = f"{cfg.paths.quarantine_root}/silver_quarantine/shared/dim_materials"
     if not quarantine_mat_df.isEmpty():
-        (
-            quarantine_mat_df.write.format("delta")
-            .mode("overwrite")
-            .option("mergeSchema", "true")
-            .save(quarantine_path)
-        )
+        (quarantine_mat_df.write.format("delta").mode("overwrite").option("mergeSchema", "true").save(quarantine_path))
 
     # Merge clean records
     target_path = f"{cfg.paths.silver}/shared/dim_materials"

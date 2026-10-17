@@ -6,8 +6,8 @@ from omegaconf import OmegaConf
 from pyspark.sql import SparkSession
 from pyspark.sql.types import StringType, StructField, StructType
 
-from saas_pipeline.silver_deliveries import split_and_enrich_deliveries
-from saas_pipeline.silver_materials import transform_silver_materials
+from saas_pipeline.silver.deliveries import split_and_enrich_deliveries
+from saas_pipeline.silver.materials import transform_silver_materials
 
 MAT_COLS = [
     "material",

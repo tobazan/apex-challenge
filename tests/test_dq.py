@@ -4,7 +4,7 @@ import pytest
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 
-from saas_pipeline.quality_log import (
+from saas_pipeline.common.quality_log import (
     CriticalDQException,
     QualityRule,
     evaluate_and_log_rules,

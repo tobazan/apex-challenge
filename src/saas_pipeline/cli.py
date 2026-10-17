@@ -4,12 +4,12 @@ import click
 from omegaconf import DictConfig
 from pyspark.sql import SparkSession
 
-from saas_pipeline.bronze_deliveries import ingest_deliveries_bronze
-from saas_pipeline.bronze_materials import ingest_materials_bronze
-from saas_pipeline.config import load_config
-from saas_pipeline.silver_deliveries import process_silver_deliveries_for_tenant
-from saas_pipeline.silver_materials import process_silver_materials
-from saas_pipeline.spark import get_spark_session
+from saas_pipeline.bronze.deliveries import ingest_deliveries_bronze
+from saas_pipeline.bronze.materials import ingest_materials_bronze
+from saas_pipeline.common.config import load_config
+from saas_pipeline.common.spark import get_spark_session
+from saas_pipeline.silver.deliveries import process_silver_deliveries_for_tenant
+from saas_pipeline.silver.materials import process_silver_materials
 
 
 def resolve_target_tenants(cfg: DictConfig) -> list[str]:

@@ -6,8 +6,8 @@ from omegaconf import OmegaConf
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 
-from saas_pipeline.bronze_deliveries import ingest_deliveries_bronze
-from saas_pipeline.bronze_materials import ingest_materials_bronze
+from saas_pipeline.bronze.deliveries import ingest_deliveries_bronze
+from saas_pipeline.bronze.materials import ingest_materials_bronze
 from saas_pipeline.cli import run_silver_layer
 
 

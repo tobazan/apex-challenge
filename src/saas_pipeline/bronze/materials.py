@@ -5,8 +5,8 @@ from omegaconf import DictConfig
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
 
-from saas_pipeline.bronze_deliveries import discover_all_string_schema
-from saas_pipeline.quality_log import build_quality_entry, write_quality_logs
+from saas_pipeline.bronze.deliveries import discover_all_string_schema
+from saas_pipeline.common.quality_log import build_quality_entry, write_quality_logs
 
 KNOWN_MATERIALS_COLS = [
     "material",

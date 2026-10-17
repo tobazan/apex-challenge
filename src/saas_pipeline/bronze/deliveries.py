@@ -6,7 +6,7 @@ from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
 from pyspark.sql.types import StringType, StructField, StructType
 
-from saas_pipeline.quality_log import build_quality_entry, write_quality_logs
+from saas_pipeline.common.quality_log import build_quality_entry, write_quality_logs
 
 KNOWN_DELIVERIES_COLS = [
     "pais",

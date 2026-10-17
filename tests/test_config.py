@@ -1,4 +1,4 @@
-from saas_pipeline.config import load_config
+from saas_pipeline.common.config import load_config
 
 
 def test_omegaconf_loading_and_overrides():
