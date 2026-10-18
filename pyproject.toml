@@ -35,3 +35,7 @@ select = ["E", "F", "I", "W"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+addopts = "-m 'not e2e'"
+markers = [
+    "e2e: full dataset end-to-end tests (deselected by default in CI)",
+]

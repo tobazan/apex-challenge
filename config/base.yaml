@@ -1,19 +1,8 @@
-environment: dev
+project:
+  name: "saas-medallion-pipeline"
 
-paths:
-  raw_deliveries: "data/raw/deliveries"
-  raw_materials: "data/raw/materials"
-  bronze: "data/bronze"
-  silver: "data/silver"
-  gold: "data/gold"
-  quarantine_root: "data"
-  quality_logs: "data/shared/quality_logs"
-  checkpoints: "data/_checkpoints"
-
-# cloud:
-#   storage_account: "adlssaas${environment}"
-#   unity_catalog: "saas_${environment}"
-#   key_vault: "kv-saas-${environment}"
+runtime: "filesystem" # Overridden via CLI --runtime [filesystem|databricks]
+environment: "dev"    # Overridden via CLI --env [dev|qa|main]
 
 execution:
   start_date: "2025-01-01"
@@ -36,3 +25,41 @@ rules:
   cs_to_st_factor: 20
   routine_delivery_types: ["ZPRE", "ZVE1"]
   bonus_delivery_types: ["Z04", "Z05"]
+
+storage:
+  filesystem:
+    raw_root: "data/raw"
+    env_root: "data/${environment}"
+    raw_deliveries: "${storage.filesystem.raw_root}/deliveries"
+    raw_materials: "${storage.filesystem.raw_root}/materials"
+    checkpoints: "${storage.filesystem.env_root}/_checkpoints"
+    targets:
+      shared:
+        quality_logs: "${storage.filesystem.env_root}/shared/quality_logs"
+        bronze_materials: "${storage.filesystem.env_root}/bronze/shared/materials_catalog"
+        silver_materials: "${storage.filesystem.env_root}/silver/shared/dim_materials"
+        quarantine_materials: "${storage.filesystem.env_root}/silver_quarantine/shared/dim_materials"
+      tenant:
+        bronze_deliveries: "${storage.filesystem.env_root}/bronze/{tenant}/deliveries"
+        silver_deliveries: "${storage.filesystem.env_root}/silver/{tenant}/fact_deliveries"
+        quarantine_deliveries: "${storage.filesystem.env_root}/silver_quarantine/{tenant}/fact_deliveries"
+        gold_daily_metrics: "${storage.filesystem.env_root}/gold/{tenant}/daily_metrics_by_delivery_type"
+
+  # databricks:
+  #   adls_account: "stsaasdatalake${environment}"
+  #   raw_root: "abfss://landing@${storage.databricks.adls_account}.dfs.core.windows.net/raw"
+  #   checkpoints: "abfss://checkpoints@${storage.databricks.adls_account}.dfs.core.windows.net/${environment}"
+  #   catalog: "saas_${environment}"
+  #   raw_deliveries: "${storage.databricks.raw_root}/deliveries"
+  #   raw_materials: "${storage.databricks.raw_root}/materials"
+  #   targets:
+  #     shared:
+  #       quality_logs: "${storage.databricks.catalog}.governance.quality_logs"
+  #       bronze_materials: "${storage.databricks.catalog}.bronze_shared.materials_catalog"
+  #       silver_materials: "${storage.databricks.catalog}.silver_shared.dim_materials"
+  #       quarantine_materials: "${storage.databricks.catalog}.silver_quarantine_shared.dim_materials"
+  #     tenant:
+  #       bronze_deliveries: "${storage.databricks.catalog}.bronze_{tenant}.deliveries"
+  #       silver_deliveries: "${storage.databricks.catalog}.silver_{tenant}.fact_deliveries"
+  #       quarantine_deliveries: "${storage.databricks.catalog}.silver_quarantine_{tenant}.fact_deliveries"
+  #       gold_daily_metrics: "${storage.databricks.catalog}.gold_{tenant}.daily_metrics_by_delivery_type"

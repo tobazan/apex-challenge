@@ -1,9 +1,14 @@
-.PHONY: setup lint fix-lint test run-bronze clean-delta clean-env clean-all
+.PHONY: setup test test-e2e lint fix-lint run-bronze run-silver run-gold run-all clean-delta clean-delta-all clean-env 
+
 
 ENV ?= dev
+RUNTIME ?= filesystem
 TENANT ?= all
-START_DATE ?= 2025-01-01
-END_DATE ?= 2025-06-30
+FAIL_FAST ?=
+FAIL_CRITICAL ?=
+
+EXTRA_FLAGS := $(FAIL_FAST) $(FAIL_CRITICAL)
+
 
 # Environment setup with uv
 setup:
@@ -22,15 +27,33 @@ fix-lint:
 test:
 	uv run pytest -v
 
-# Parameterized bronze ingestion
+# Local full-dataset E2E test
+test-e2e:
+	uv run pytest -v -m e2e
+
+# Parameterized pipeline running
 run-bronze:
-	uv run saas_pipeline --env $(ENV) --tenant $(TENANT) --start-date $(START_DATE) --end-date $(END_DATE) --layer bronze
+	uv run saas_pipeline --env $(ENV) --runtime $(RUNTIME) --tenant $(TENANT) --layer bronze $(EXTRA_FLAGS)
+
+run-silver:
+	uv run saas_pipeline --env $(ENV) --runtime $(RUNTIME) --tenant $(TENANT) --layer silver $(EXTRA_FLAGS)
+
+run-gold:
+	uv run saas_pipeline --env $(ENV) --runtime $(RUNTIME) --tenant $(TENANT) --layer gold $(EXTRA_FLAGS)
+
+run-all:
+	uv run saas_pipeline --env $(ENV) --runtime $(RUNTIME) --tenant $(TENANT) --layer all $(EXTRA_FLAGS)
 
 # Clean Delta storage outputs, checkpoints and local Spark metastores
 clean-delta:
-	rm -rf data/bronze data/silver data/gold data/shared data/_checkpoints
-	rm -rf data/qa data/main
-	rm -rf spark-warehouse metastore_db derby.log .spark-staging
+	@echo "Cleaning local Delta tables and checkpoints for ENV=$(ENV)..."
+	rm -rf data/$(ENV)
+	rm -rf spark-warehouse metastore_db derby.log
+
+clean-delta-all:
+	@echo "Cleaning local Delta tables across all environments (dev, qa, main)..."
+	rm -rf data/dev data/qa data/main
+	rm -rf spark-warehouse metastore_db derby.log
 
 # Clean virtual environment and test/lint caches
 clean-env:

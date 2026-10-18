@@ -1,6 +1,6 @@
 from pyspark.sql import SparkSession
 
-from saas_pipeline.spark import is_databricks
+from saas_pipeline.common.spark import is_databricks
 
 
 def test_spark_session_configuration(spark: SparkSession):

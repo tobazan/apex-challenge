@@ -1,15 +1,8 @@
-environment: dev
-
-paths:
-  bronze: "data/bronze"
-  silver: "data/silver"
-  gold: "data/gold"
-  quarantine_root: "data"
-  quality_logs: "data/shared/quality_logs"
-  checkpoints: "data/_checkpoints"
-
+environment: "dev"
 execution:
   fail_fast: false
-  
 quality:
   fail_on_critical: false
+# storage:
+#   databricks:
+#     adls_account: "stsaasdatalakedev"
