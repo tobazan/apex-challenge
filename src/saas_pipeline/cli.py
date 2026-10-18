@@ -6,22 +6,20 @@ from pyspark.sql import SparkSession
 
 from saas_pipeline.bronze.deliveries import ingest_deliveries_bronze
 from saas_pipeline.bronze.materials import ingest_materials_bronze
-from saas_pipeline.common.config import load_config
+from saas_pipeline.common.config import load_config, resolve_target_tenants
 from saas_pipeline.common.spark import get_spark_session
 from saas_pipeline.silver.deliveries import process_silver_deliveries_for_tenant
 from saas_pipeline.silver.materials import process_silver_materials
 
 
-def resolve_target_tenants(cfg: DictConfig) -> list[str]:
-    """Returns the list of tenants to process based on execution.tenant."""
-    target = cfg.execution.tenant.lower()
-    if target == "all":
-        return [str(t).lower() for t in cfg.registered_tenants]
-    return [target]
+def run_bronze_layer(spark: SparkSession, cfg: DictConfig, run_id: str) -> None:
+    click.echo(f"[BRONZE] Ingesting materials catalog (run_id={run_id})...")
+    ingest_materials_bronze(spark, cfg, run_id=run_id)
+    click.echo(f"[BRONZE] Ingesting deliveries (run_id={run_id})...")
+    ingest_deliveries_bronze(spark, cfg, run_id=run_id)
 
 
 def run_silver_layer(spark: SparkSession, cfg: DictConfig, run_id: str) -> None:
-    """Executes Silver layer (dim_materials SCD2 + fact_deliveries + quarantine + DQ) across tenants"""
     click.echo(f"[SILVER] Processing shared dim_materials (run_id={run_id})...")
     process_silver_materials(spark, cfg, run_id=run_id)
 
@@ -44,16 +42,23 @@ def run_silver_layer(spark: SparkSession, cfg: DictConfig, run_id: str) -> None:
 
 @click.command()
 @click.option("--env", default="dev", type=click.Choice(["dev", "qa", "main"]), help="Target environment")
-@click.option("--tenant", default="all", help="Tenant code (e.g., sv, gt) or 'all'")
-@click.option("--start-date", default=None, help="Start date (YYYY-MM-DD)")
-@click.option("--end-date", default=None, help="End date (YYYY-MM-DD)")
 @click.option(
     "--layer", default="bronze", type=click.Choice(["bronze", "silver", "gold", "all"]), help="Layer to execute"
 )
+@click.option(
+    "--runtime",
+    default="filesystem",
+    type=click.Choice(["filesystem", "databricks"]),
+    help="Storage runtime mode - local 'filesystem' or Unity Catalog 'databricks'",
+)
+@click.option("--tenant", default="all", help="Tenant code (e.g., sv, gt) or 'all'")
+@click.option("--start-date", default=None, help="Start date (YYYY-MM-DD)")
+@click.option("--end-date", default=None, help="End date (YYYY-MM-DD)")
 @click.option("--fail-fast/--no-fail-fast", default=None, help="Halt exec immediately on the 1st failed tenant")
 @click.option("--fail-on-critical/--no-fail-on-critical", default=None, help="Abort exec if a critical DQ check fails")
 def main(
     env: str,
+    runtime: str,
     tenant: str,
     start_date: str | None,
     end_date: str | None,
@@ -64,27 +69,30 @@ def main(
     # Entrypoint for the pipeline
     cfg = load_config(
         env=env,
+        runtime=runtime,
         tenant=tenant,
         start_date=start_date,
         end_date=end_date,
         fail_fast=fail_fast,
         fail_on_critical=fail_on_critical,
     )
-    click.echo(f"[CONFIG LOADED] for env={cfg.environment}, tenant={cfg.execution.tenant}...")
 
-    spark = get_spark_session()
+    spark = get_spark_session(f"SaaS_Pipeline_{env.upper()}_{layer.upper()}")
     run_id = str(uuid.uuid4())[:8]
 
-    if layer in ("bronze", "all"):
-        click.echo(f"[BRONZE] Starting streaming ingestion (run_id={run_id})")
-        ingest_materials_bronze(spark, cfg, run_id=run_id)
-        ingest_deliveries_bronze(spark, cfg, run_id=run_id)
-        click.echo("[BRONZE] Ingestion and quality logging complete.")
+    click.echo(f"""[STARTING PIPELINE]
+        Config loaded for:
+        - runtime={cfg.runtime}
+        - env={cfg.environment}
+        - tenant={cfg.execution.tenant}
+        - layer={layer}
+        - run_id={run_id}
+    """)
 
+    if layer in ("bronze", "all"):
+        run_bronze_layer(spark, cfg, run_id)
     if layer in ("silver", "all"):
-        click.echo(f"[SILVER] Starting Silver transformations (run_id={run_id})")
-        run_silver_layer(spark, cfg, run_id=run_id)
-        click.echo("[SILVER] Transformations, quarantine routing and DQ checks complete")
+        run_silver_layer(spark, cfg, run_id)
 
 
 if __name__ == "__main__":

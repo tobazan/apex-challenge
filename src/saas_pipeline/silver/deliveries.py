@@ -1,11 +1,15 @@
-from pathlib import Path
-
-from delta.tables import DeltaTable
 from omegaconf import DictConfig
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
 from pyspark.sql.types import DecimalType, LongType
 
+from saas_pipeline.common.config import get_target
+from saas_pipeline.common.delta import (
+    delta_exists,
+    get_delta_table,
+    read_delta,
+    write_delta,
+)
 from saas_pipeline.common.quality_log import (
     QualityRule,
     build_quality_entry,
@@ -174,39 +178,38 @@ def split_and_enrich_deliveries(
 
 def process_silver_deliveries_for_tenant(spark: SparkSession, tenant: str, cfg: DictConfig, run_id: str) -> None:
     "Processes Bronze -> Silver fact_deliveries and quarantine for a single tenant"
-    bronze_path = f"{cfg.paths.bronze}/{tenant}/deliveries"
-    if not Path(bronze_path).exists():
-        return
+    bronze_target = get_target(cfg, "bronze_deliveries", tenant=tenant)
+    dim_target = get_target(cfg, "silver_materials")
+    quarantine_target = get_target(cfg, "quarantine_deliveries", tenant=tenant)
+    silver_target = get_target(cfg, "silver_deliveries", tenant=tenant)
 
-    bronze_df = spark.read.format("delta").load(bronze_path)
+    bronze_df = read_delta(spark, cfg, bronze_target)
+    dim_materials_df = read_delta(spark, cfg, dim_target)
 
     # Filter Bronze by configured start_date and end_date
-    start_ymd = cfg.execution.start_date.replace("-", "")
-    end_ymd = cfg.execution.end_date.replace("-", "")
-    bronze_filtered_df = bronze_df.filter(
-        (~F.col("fecha_proceso").rlike(r"^\d{8}$"))
-        | (F.col("fecha_proceso") < "20000101")
-        | (F.col("fecha_proceso") > "20991231")
-        | ((F.col("fecha_proceso") >= start_ymd) & (F.col("fecha_proceso") <= end_ymd))
-    )
+    # start_ymd = cfg.execution.start_date.replace("-", "")
+    # end_ymd = cfg.execution.end_date.replace("-", "")
+    # bronze_filtered_df = bronze_df.filter(
+    #     (~F.col("fecha_proceso").rlike(r"^\d{8}$"))
+    #     | (F.col("fecha_proceso") < "20000101")
+    #     | (F.col("fecha_proceso") > "20991231")
+    #     | ((F.col("fecha_proceso") >= start_ymd) & (F.col("fecha_proceso") <= end_ymd))
+    # )
 
-    if bronze_filtered_df.isEmpty():
-        return
-
-    dim_path = f"{cfg.paths.silver}/shared/dim_materials"
-    dim_materials_df = spark.read.format("delta").load(dim_path)
+    # if bronze_filtered_df.isEmpty():
+    #     return
 
     valid_df, quarantine_df, dup_dropped, discarded_cnt = split_and_enrich_deliveries(
-        bronze_filtered_df, dim_materials_df, cfg
+        # bronze_filtered_df, dim_materials_df, cfg
+        bronze_df,
+        dim_materials_df,
+        cfg,
     )
 
-    # Persist Quarantine rows (data/silver_quarantine/<tenant>/fact_deliveries)
-    quarantine_path = f"{cfg.paths.quarantine_root}/silver_quarantine/{tenant}/fact_deliveries"
     if not quarantine_df.isEmpty():
-        (quarantine_df.write.format("delta").mode("overwrite").option("mergeSchema", "true").save(quarantine_path))
+        write_delta(quarantine_df, cfg, quarantine_target, mode="overwrite", merge_schema=True)
 
     # MERGE INTO Silver fact_deliveries
-    silver_path = f"{cfg.paths.silver}/{tenant}/fact_deliveries"
     merge_condition = (
         "target.tenant_id = source.tenant_id AND "
         "target.fecha_proceso = source.fecha_proceso AND "
@@ -216,8 +219,8 @@ def process_silver_deliveries_for_tenant(spark: SparkSession, tenant: str, cfg: 
         "target.tipo_entrega = source.tipo_entrega"
     )
 
-    if DeltaTable.isDeltaTable(spark, silver_path):
-        delta_tbl = DeltaTable.forPath(spark, silver_path)
+    if delta_exists(spark, cfg, silver_target):
+        delta_tbl = get_delta_table(spark, cfg, silver_target)
         (
             delta_tbl.alias("target")
             .merge(valid_df.alias("source"), merge_condition)
@@ -226,7 +229,13 @@ def process_silver_deliveries_for_tenant(spark: SparkSession, tenant: str, cfg: 
             .execute()
         )
     else:
-        (valid_df.write.format("delta").mode("overwrite").partitionBy("fecha_proceso").save(silver_path))
+        write_delta(
+            valid_df,
+            cfg,
+            silver_target,
+            mode="overwrite",
+            partition_by=["fecha_proceso"],
+        )
 
     # Evaluate and log Silver DQ checks, count anomalies found during quarantine routing
     total_evaluated = valid_df.count() + quarantine_df.count()
@@ -294,7 +303,7 @@ def process_silver_deliveries_for_tenant(spark: SparkSession, tenant: str, cfg: 
     ]
 
     # Critical post-merge DQ checks on Silver
-    silver_final_df = spark.read.format("delta").load(silver_path)
+    silver_final_df = read_delta(spark, cfg, silver_target)
     critical_silver_rules = [
         QualityRule(
             name="silver_valid_fecha_proceso_not_null",
@@ -324,12 +333,11 @@ def process_silver_deliveries_for_tenant(spark: SparkSession, tenant: str, cfg: 
     evaluate_and_log_rules(
         df=silver_final_df,
         rules=critical_silver_rules,
+        cfg=cfg,
         run_id=run_id,
         batch_id=batch_uid,
         tenant_id=tenant,
         layer="silver",
         table_name="fact_deliveries",
-        quality_logs_path=cfg.paths.quality_logs,
-        fail_on_critical=cfg.quality.fail_on_critical,
         extra_entries=pre_merge_entries,
     )

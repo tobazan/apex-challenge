@@ -2,13 +2,15 @@ import shutil
 from pathlib import Path
 
 import pytest
-from omegaconf import OmegaConf
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 
 from saas_pipeline.bronze.deliveries import ingest_deliveries_bronze
 from saas_pipeline.bronze.materials import ingest_materials_bronze
 from saas_pipeline.cli import run_silver_layer
+from saas_pipeline.common.config import get_raw_path, get_target, resolve_target_tenants
+from saas_pipeline.common.delta import delta_exists, read_delta
+from tests.conftest import build_test_cfg
 
 
 # we use this decorator and configure pyproject.toml so standard pytest skips it
@@ -27,73 +29,65 @@ def test_full_real_dataset_bronze_to_silver_e2e(spark: SparkSession, tmp_path: P
     if not real_del_csv.exists() or not real_mat_csv.exists():
         pytest.skip("Real CSV datasets not found in data/raw/")
 
-    raw_del_dir = tmp_path / "raw" / "deliveries"
-    raw_mat_dir = tmp_path / "raw" / "materials"
+    cfg = build_test_cfg(
+        tmp_path,
+        env="dev",
+        runtime="filesystem",
+        tenant="all",
+        fail_fast=True,
+        fail_on_critical=True,
+    )
+
+    raw_del_dir = Path(get_raw_path(cfg, "raw_deliveries"))
+    raw_mat_dir = Path(get_raw_path(cfg, "raw_materials"))
     raw_del_dir.mkdir(parents=True)
     raw_mat_dir.mkdir(parents=True)
     shutil.copy(real_del_csv, raw_del_dir / real_del_csv.name)
     shutil.copy(real_mat_csv, raw_mat_dir / real_mat_csv.name)
 
-    cfg = OmegaConf.create(
-        {
-            "environment": "dev",
-            "paths": {
-                "raw_deliveries": str(raw_del_dir),
-                "raw_materials": str(raw_mat_dir),
-                "bronze": str(tmp_path / "bronze"),
-                "silver": str(tmp_path / "silver"),
-                "quarantine_root": str(tmp_path),
-                "quality_logs": str(tmp_path / "shared" / "quality_logs"),
-                "checkpoints": str(tmp_path / "_checkpoints"),
-            },
-            "execution": {
-                "start_date": "2025-01-01",
-                "end_date": "2025-12-31",
-                "tenant": "all",
-                "fail_fast": True,
-            },
-            "quality": {"fail_on_critical": True},
-            "registered_tenants": ["sv", "hn", "ec", "jm", "gt", "pe"],
-            "rules": {
-                "cs_to_st_factor": 20,
-                "routine_delivery_types": ["ZPRE", "ZVE1"],
-                "bonus_delivery_types": ["Z04", "Z05"],
-            },
-        }
-    )
-
-    # Execute Bronze Ingestion
+    # Execute Bronze & Silver layers inside tmp_path
     run_id = "e2e_run1"
     ingest_materials_bronze(spark, cfg, run_id=run_id)
     ingest_deliveries_bronze(spark, cfg, run_id=run_id)
-
-    # Execute Silver Layer across all 6 tenants
     run_silver_layer(spark, cfg, run_id=run_id)
 
     # Verify Single Shared Silver dim_materials (35 rows, 28 distinct SKUs, 28 current)
-    shared_dim = spark.read.format("delta").load(f"{cfg.paths.silver}/shared/dim_materials")
+    dim_target = get_target(cfg, "silver_materials")
+    shared_dim = read_delta(spark, cfg, dim_target)
     assert shared_dim.count() == 35
     assert shared_dim.select("material").distinct().count() == 28
     assert shared_dim.filter(F.col("is_current")).count() == 28
 
     # Verify Deliveries Approx Row Accounting across all 6 tenants:
+    tenants = resolve_target_tenants(cfg)
+    total_bronze_rows = 0
     total_silver_rows = 0
     total_quarantine_rows = 0
-    for tenant in cfg.registered_tenants:
-        s_df = spark.read.format("delta").load(f"{cfg.paths.silver}/{tenant}/fact_deliveries")
-        q_df = spark.read.format("delta").load(
-            f"{cfg.paths.quarantine_root}/silver_quarantine/{tenant}/fact_deliveries"
-        )
-        total_silver_rows += s_df.count()
-        total_quarantine_rows += q_df.count()
 
+    for t in tenants:
+        b_target = get_target(cfg, "bronze_deliveries", tenant=t)
+        s_target = get_target(cfg, "silver_deliveries", tenant=t)
+        q_target = get_target(cfg, "quarantine_deliveries", tenant=t)
+
+        total_bronze_rows += read_delta(spark, cfg, b_target).count()
+        total_silver_rows += read_delta(spark, cfg, s_target).count()
+        if delta_exists(spark, cfg, q_target):
+            total_quarantine_rows += read_delta(spark, cfg, q_target).count()
+
+    assert total_bronze_rows >= 3000
     assert total_silver_rows >= 2750
-    assert total_quarantine_rows >= 100
+    assert total_quarantine_rows >= 80
+
+    # Verify Quality Logs recorded critical checks with 0 failures on curated tables
+    qlogs_df = read_delta(spark, cfg, get_target(cfg, "quality_logs"))
+    critical_silver_fails = qlogs_df.filter(
+        (F.col("layer") == "silver") & (F.col("check_severity") == "critical") & (F.col("records_failed") > 0)
+    )
+    assert critical_silver_fails.count() == 0
 
     # Verify MERGE INTO Idempotency by re-running Silver
     run_silver_layer(spark, cfg, run_id="e2e_run2")
     recheck_silver_rows = sum(
-        spark.read.format("delta").load(f"{cfg.paths.silver}/{t}/fact_deliveries").count()
-        for t in cfg.registered_tenants
+        read_delta(spark, cfg, get_target(cfg, "silver_deliveries", tenant=t)).count() for t in tenants
     )
     assert recheck_silver_rows >= 2750

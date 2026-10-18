@@ -1,7 +1,8 @@
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from pyspark.sql import Column, DataFrame, SparkSession
+from omegaconf import DictConfig
+from pyspark.sql import Column, DataFrame
 from pyspark.sql import functions as F
 from pyspark.sql.types import (
     BooleanType,
@@ -11,6 +12,9 @@ from pyspark.sql.types import (
     StructType,
     TimestampType,
 )
+
+from saas_pipeline.common.config import get_target
+from saas_pipeline.common.delta import write_delta
 
 
 class CriticalDQException(RuntimeError):
@@ -69,65 +73,58 @@ def build_quality_entry(
     }
 
 
-def write_quality_logs(spark: SparkSession, quality_logs_path: str, entries: list[dict]):
-    "Log executed validations to shared Delta quality_logs table"
-    if not entries:
-        return
-    logs_df = spark.createDataFrame(entries, schema=QUALITY_LOGS_SCHEMA)
-    logs_df.write.format("delta").mode("append").save(quality_logs_path)
-
-
 def evaluate_and_log_rules(
     df: DataFrame,
     rules: list[QualityRule],
+    cfg: DictConfig,
     run_id: str,
     batch_id: str,
     tenant_id: str,
     layer: str,
     table_name: str,
-    quality_logs_path: str,
-    fail_on_critical: bool = False,
     extra_entries: list[dict] | None = None,
 ) -> list[dict]:
-    """
-    Evaluates declarative QualityRules in a single pass, writes results to quality_logs,
-    and raises CriticalDQException if fail_on_critical is True and a critical check fails
-    """
     spark = df.sparkSession
-    agg_exprs = [F.count("*").alias("_total_rows")]
-    for rule in rules:
-        agg_exprs.append(F.sum(F.when(~rule.valid_condition, F.lit(1)).otherwise(F.lit(0))).alias(rule.name))
-
-    metrics_row = df.agg(*agg_exprs).first()
-    total_rows = int(metrics_row["_total_rows"] or 0)
-
     entries: list[dict] = list(extra_entries) if extra_entries else []
-    failed_critical_checks: list[str] = []
 
-    for rule in rules:
-        failed_count = int(metrics_row[rule.name] or 0) if total_rows > 0 else 0
-        entries.append(
-            build_quality_entry(
-                run_id=run_id,
-                batch_id=batch_id,
-                tenant_id=tenant_id,
-                layer=layer,
-                table_name=table_name,
-                check_name=rule.name,
-                check_severity=rule.severity,
-                records_checked=total_rows,
-                records_failed=failed_count,
+    if rules:
+        agg_exprs = [F.count(F.lit(1)).alias("_total_records")]
+        for idx, rule in enumerate(rules):
+            fail_cond = F.when(rule.valid_condition.isNull() | (~rule.valid_condition), F.lit(1)).otherwise(F.lit(0))
+            agg_exprs.append(F.sum(fail_cond).alias(f"_fail_{idx}"))
+
+        metrics_row = df.agg(*agg_exprs).collect()[0]
+        total_records = int(metrics_row["_total_records"] or 0)
+
+        for idx, rule in enumerate(rules):
+            failed_cnt = int(metrics_row[f"_fail_{idx}"] or 0)
+            entries.append(
+                build_quality_entry(
+                    run_id=run_id,
+                    batch_id=batch_id,
+                    tenant_id=tenant_id,
+                    layer=layer,
+                    table_name=table_name,
+                    check_name=rule.name,
+                    check_severity=rule.severity,
+                    records_checked=total_records,
+                    records_failed=failed_cnt,
+                )
             )
-        )
-        if rule.severity.lower() == "critical" and failed_count > 0:
-            failed_critical_checks.append(f"{rule.name} (failed={failed_count})")
 
-    write_quality_logs(spark, quality_logs_path, entries)
+    if entries:
+        log_df = spark.createDataFrame(entries, schema=QUALITY_LOGS_SCHEMA)
+        qlogs_target = get_target(cfg, "quality_logs")
+        write_delta(log_df, cfg, qlogs_target, mode="append", merge_schema=True)
 
-    if fail_on_critical and failed_critical_checks:
+    should_abort = bool(
+        cfg.get("quality", {}).get("fail_on_critical", False) or cfg.get("execution", {}).get("fail_on_critical", False)
+    )
+    critical_failures = [e for e in entries if e["check_severity"] == "critical" and e["records_failed"] > 0]
+    if should_abort and critical_failures:
+        failed_names = ", ".join(f"{e['check_name']} ({e['records_failed']} failed)" for e in critical_failures)
         raise CriticalDQException(
-            f"Critical quality check(s) failed for tenant='{tenant_id}' on {layer}.{table_name}: "
-            f"{', '.join(failed_critical_checks)}"
+            f"Critical quality check(s) failed on {layer}.{table_name} [tenant={tenant_id}]: {failed_names}"
         )
 
     return entries

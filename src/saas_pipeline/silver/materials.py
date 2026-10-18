@@ -1,20 +1,26 @@
 import uuid
 
-from delta.tables import DeltaTable
 from omegaconf import DictConfig
 from pyspark.sql import DataFrame, SparkSession, Window
 from pyspark.sql import functions as F
 from pyspark.sql.types import DecimalType
 
-from saas_pipeline.common.quality_log import QualityRule, build_quality_entry, evaluate_and_log_rules
+from saas_pipeline.common.config import get_target
+from saas_pipeline.common.delta import (
+    delta_exists,
+    get_delta_table,
+    read_delta,
+    write_delta,
+)
+from saas_pipeline.common.quality_log import (
+    QualityRule,
+    build_quality_entry,
+    evaluate_and_log_rules,
+)
 
 
 def transform_silver_materials(bronze_mat_df: DataFrame) -> tuple[DataFrame, DataFrame]:
-    """
-    Cleans and enforces SCD Type 2 integrity on materials catalog:
-    - Quarantine: missing SKU, non-positive precio_base, or invalid date interval
-    - Valid: typed (Decimal, Date, Boolean) with single is_current=True per SKU
-    """
+    """Cleans, validates, and splits materials catalog into valid SCD2 rows and quarantined rows."""
     parsed_df = (
         bronze_mat_df.withColumn(
             "_clean_material",
@@ -48,11 +54,9 @@ def transform_silver_materials(bronze_mat_df: DataFrame) -> tuple[DataFrame, Dat
         F.when(F.size(compact_reasons) > 0, F.concat_ws("|", compact_reasons)).otherwise(F.lit(None)),
     )
 
-    # Quarantine output
     quarantine_cols = [c for c in bronze_mat_df.columns] + ["_quarantine_reason"]
     quarantine_df = evaluated_df.filter(F.col("_quarantine_reason").isNotNull()).select(*quarantine_cols)
 
-    # Valid SCD2 output
     valid_candidates_df = (
         evaluated_df.filter(F.col("_quarantine_reason").isNull())
         .select(
@@ -91,18 +95,15 @@ def merge_dim_materials(
     run_id: str,
 ) -> None:
     "SCD2 MERGE INTO, quarantine and logs quality for dim_materials"
-    batch_uid = f"{run_id}_dim_mat"
+    batch_uid = f"{run_id}_dim_mat_shared"
 
-    # Quarantine if any corrupt catalog records exist
-    quarantine_path = f"{cfg.paths.quarantine_root}/silver_quarantine/shared/dim_materials"
+    quarantine_target = get_target(cfg, "quarantine_materials")
     if not quarantine_mat_df.isEmpty():
-        (quarantine_mat_df.write.format("delta").mode("overwrite").option("mergeSchema", "true").save(quarantine_path))
+        write_delta(quarantine_mat_df, cfg, quarantine_target, mode="overwrite", merge_schema=True)
 
-    # Merge clean records
-    target_path = f"{cfg.paths.silver}/shared/dim_materials"
-
-    if DeltaTable.isDeltaTable(spark, target_path):
-        delta_tbl = DeltaTable.forPath(spark, target_path)
+    dim_target = get_target(cfg, "silver_materials")
+    if delta_exists(spark, cfg, dim_target):
+        delta_tbl = get_delta_table(spark, cfg, dim_target)
         (
             delta_tbl.alias("target")
             .merge(
@@ -113,7 +114,7 @@ def merge_dim_materials(
             .whenNotMatchedInsertAll()
             .execute()
         )
-        merged_df = spark.read.format("delta").load(target_path)
+        merged_df = read_delta(spark, cfg, dim_target)
         w_latest = Window.partitionBy("material").orderBy(F.col("valid_from").desc())
         reconciled_df = (
             merged_df.withColumn("_rn", F.row_number().over(w_latest))
@@ -123,11 +124,10 @@ def merge_dim_materials(
             )
             .drop("_rn")
         )
-        reconciled_df.write.format("delta").mode("overwrite").save(target_path)
+        write_delta(reconciled_df, cfg, dim_target, mode="overwrite")
     else:
-        valid_mat_df.write.format("delta").mode("overwrite").save(target_path)
+        write_delta(valid_mat_df, cfg, dim_target, mode="overwrite")
 
-    # Log quality checks
     total_eval = valid_mat_df.count() + quarantine_mat_df.count()
     q_fails = quarantine_mat_df.count()
 
@@ -145,7 +145,7 @@ def merge_dim_materials(
         )
     ]
 
-    final_df = spark.read.format("delta").load(target_path)
+    final_df = read_delta(spark, cfg, dim_target)
     rules = [
         QualityRule(
             name="silver_dim_materials_valid_interval",
@@ -163,13 +163,12 @@ def merge_dim_materials(
     evaluate_and_log_rules(
         df=final_df,
         rules=rules,
+        cfg=cfg,
         run_id=run_id,
         batch_id=batch_uid,
         tenant_id="shared",
         layer="silver",
         table_name="dim_materials",
-        quality_logs_path=cfg.paths.quality_logs,
-        fail_on_critical=cfg.quality.fail_on_critical,
         extra_entries=pre_entries,
     )
 
@@ -177,10 +176,9 @@ def merge_dim_materials(
 def process_silver_materials(spark: SparkSession, cfg: DictConfig, run_id: str | None = None) -> str:
     """Loads Bronze materials catalog, splits anomalies, and merges SCD2 dim_materials per tenant"""
     active_run_id = run_id or str(uuid.uuid4())[:8]
-    bronze_path = f"{cfg.paths.bronze}/shared/materials_catalog"
-    bronze_mat_df = spark.read.format("delta").load(bronze_path)
+    bronze_target = get_target(cfg, "bronze_materials")
+    bronze_mat_df = read_delta(spark, cfg, bronze_target)
+
     valid_df, quarantine_df = transform_silver_materials(bronze_mat_df)
-
     merge_dim_materials(spark, valid_df, quarantine_df, cfg, active_run_id)
-
     return active_run_id

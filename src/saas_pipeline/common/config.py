@@ -1,55 +1,75 @@
 from pathlib import Path
-from typing import Optional
 
 from omegaconf import DictConfig, OmegaConf
 
 
 def load_config(
     env: str = "dev",
-    tenant: Optional[str] = None,
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-    config_dir: str | Path = "config",
+    runtime: str = "filesystem",
+    tenant: str = "all",
+    start_date: str | None = None,
+    end_date: str | None = None,
     fail_fast: bool | None = None,
     fail_on_critical: bool | None = None,
+    config_root: Path | None = None,
 ) -> DictConfig:
-    """Loads hierarchical OmegaConf merging base, env, tenant, and CLI overrides"""
-    base_path = Path(config_dir)
-    base_file = base_path / "base.yaml"
-    if not base_file.exists():
-        raise FileNotFoundError(f"Base config file not found at {base_file}")
+    """Loads and merges base.yaml -> environments/{env}.yaml -> tenants/{tenant}.yaml."""
+    root = config_root or Path(__file__).resolve().parents[3] / "config"
 
-    cfg = OmegaConf.load(base_file)
+    base_cfg = OmegaConf.load(root / "base.yaml")
+    env_path = root / "environments" / f"{env}.yaml"
+    env_cfg = OmegaConf.load(env_path) if env_path.exists() else OmegaConf.create({})
 
-    # Merge env config
-    env_file = base_path / "env" / f"{env}.yaml"
-    if not env_file.exists():
-        raise FileNotFoundError(f"Environment config file not found at {env_file}")
-    env_cfg = OmegaConf.load(env_file)
-    cfg = OmegaConf.merge(cfg, env_cfg)
+    tenant_cfg = OmegaConf.create({})
+    if tenant != "all":
+        t_path = root / "tenants" / f"{tenant.lower()}.yaml"
+        if t_path.exists():
+            tenant_cfg = OmegaConf.load(t_path)
 
-    # Merge tenant config if specific single tenant
-    effective_tenant = (tenant or cfg.execution.tenant).lower()
-    if effective_tenant != "all":
-        tenant_file = base_path / "tenants" / f"{effective_tenant}.yaml"
-        if tenant_file.exists():
-            tenant_cfg = OmegaConf.load(tenant_file)
-            cfg = OmegaConf.merge(cfg, tenant_cfg)
+    cfg = OmegaConf.merge(base_cfg, env_cfg, tenant_cfg)
 
     # Apply CLI overrides
-    cli_overrides: dict = {"execution": {}}
-    if tenant is not None:
-        cli_overrides["execution"]["tenant"] = effective_tenant
+    cfg.environment = env
+    cfg.runtime = runtime
+    cfg.execution.tenant = tenant
     if start_date is not None:
-        cli_overrides["execution"]["start_date"] = start_date
+        cfg.execution.start_date = start_date
     if end_date is not None:
-        cli_overrides["execution"]["end_date"] = end_date
+        cfg.execution.end_date = end_date
     if fail_fast is not None:
-        cli_overrides["execution"]["fail_fast"] = fail_fast
+        cfg.execution.fail_fast = fail_fast
     if fail_on_critical is not None:
-        cli_overrides["quality"]["fail_on_critical"] = fail_on_critical
-
-    if cli_overrides["execution"]:
-        cfg = OmegaConf.merge(cfg, OmegaConf.create(cli_overrides))
+        cfg.quality.fail_on_critical = fail_on_critical
 
     return cfg
+
+
+def resolve_target_tenants(cfg: DictConfig) -> list[str]:
+    """Returns the list of tenants to process based on execution.tenant."""
+    if cfg.execution.tenant == "all":
+        return [str(t).lower() for t in cfg.registered_tenants]
+    return [str(cfg.execution.tenant).lower()]
+
+
+def get_raw_path(cfg: DictConfig, source_key: str) -> str:
+    """Returns raw_deliveries or raw_materials path for the active runtime."""
+    return str(cfg.storage[cfg.runtime][source_key])
+
+
+def get_checkpoint_path(cfg: DictConfig, name: str) -> str:
+    """Returns structured streaming checkpoint path for the active runtime."""
+    base = str(cfg.storage[cfg.runtime].checkpoints)
+    return f"{base}/{name}"
+
+
+def get_target(cfg: DictConfig, target_key: str, tenant: str | None = None) -> str:
+    """
+    Resolves a shared or tenant-scoped target (filesystem path or UC 3-level table name).
+    - Shared keys: 'quality_logs', 'bronze_materials', 'silver_materials', 'quarantine_materials'
+    - Tenant keys: 'bronze_deliveries', 'silver_deliveries', 'quarantine_deliveries', 'gold_daily_metrics'
+    """
+    targets = cfg.storage[cfg.runtime].targets
+    if tenant is None or tenant == "shared":
+        return str(targets.shared[target_key])
+    template = str(targets.tenant[target_key])
+    return template.format(tenant=tenant.lower())

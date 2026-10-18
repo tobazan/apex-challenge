@@ -162,7 +162,7 @@ executed_at TIMESTAMP
 
 ### Quality Control Gates
 - **`execution.fail_fast`**: When enabled, an unhandled exception or tenant-level failure halts multi-tenant batch iterations immediately.
-- **`quality.fail_on_critical`**: When enabled (`dev: false`, `qa/main: true`), any check where `check_severity == 'critical'` and `records_failed > 0` raises `DataQualityCriticalException`, aborting the pipeline before downstream layer execution.
+- **`quality.fail_on_critical`**: When enabled (`dev: false`, `qa/main: true`), any check where `check_severity == 'critical'` and `records_failed > 0` raises `CriticalDQException`, aborting the pipeline before downstream layer execution.
 
 ---
 
@@ -178,10 +178,11 @@ executed_at TIMESTAMP
 │
 ├── data/                            # Local lakehouse storage (Git-ignored)
 │   ├── raw/                         # Source CSV drops (deliveries, materials)
-│   ├── bronze/                      # Raw Delta tables
-│   ├── silver/                      # Curated clean Delta tables
-│   ├── silver_quarantine/           # Isolated anomaly Delta tables
-│   └── shared/                      # quality_logs Delta table
+|   └── dev/
+│       ├── bronze/                  # Raw Delta tables
+│       ├── silver/                  # Curated clean Delta tables
+│       ├── silver_quarantine/       # Isolated anomaly Delta tables
+│       └── shared/                  # quality_logs Delta table
 │
 ├── src/
 │   └── saas_pipeline/
@@ -190,7 +191,8 @@ executed_at TIMESTAMP
 │       │
 │       ├── common/                  # Foundational cross-cutting utilities
 │       │   ├── config.py            # OmegaConf hierarchical loader & CLI overrides
-│       │   ├── quality.py           # PySpark rule evaluator & quality_logs engine
+│       │   ├── delta.py             # Delta tables functions
+│       │   ├── quality_log.py       # PySpark rule evaluator & quality_logs engine
 │       │   └── spark.py             # SparkSession builder with Delta Lake extensions
 │       │
 │       ├── bronze/                  # Bronze streaming ingestion
@@ -205,17 +207,15 @@ executed_at TIMESTAMP
 │   ├── conftest.py                  # Pytest fixtures & session-scoped SparkSession
 │   ├── test_config.py               # OmegaConf inheritance & interpolation tests
 │   ├── test_bronze.py               # Streaming ingestion unit tests
-│   ├── test_quality.py              # Quality engine & fail_on_critical tests
-│   ├── test_silver_materials.py     # SCD2 dimension merge unit tests
-│   ├── test_silver_transforms.py    # Unit conversions, discards, and quarantine tests
+│   ├── test_dq.py                   # Quality engine & fail_on_critical tests
+│   ├── test_silver.py               # SCD2 dim merge and deliveries fact unit tests
 │   └── test_e2e_silver.py           # Full real-dataset (3,115 rows) E2E integration test
 │
 ├── .github/
 │   └── workflows/
 │       └── ci.yml                   # CI: lint, config validation, wheel build, pytest
 ├── Makefile                         # Unified developer automation commands
-├── pyproject.toml                   # Project metadata, dependencies, and tools
-└── inspect_medallion.py             # Delta table verification & audit inspection script
+└── pyproject.toml                   # Project metadata, dependencies, and tools
 ```
 
 ---
@@ -260,12 +260,6 @@ make run-silver
 
 # Run with explicit quality gate overrides
 uv run saas-pipeline --env dev --tenant all --layer silver --fail-fast --fail-on-critical
-```
-
-### 3. Inspect Lakehouse State
-Run the medallion inspector script to verify table counts, SCD2 versions and quarantine breakdowns:
-```bash
-uv run python inspect_medallion.py all
 ```
 
 ---
