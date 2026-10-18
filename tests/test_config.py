@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from conftest import build_test_cfg
+
 from saas_pipeline.common.config import (
     get_checkpoint_path,
     get_raw_path,
@@ -7,7 +9,6 @@ from saas_pipeline.common.config import (
     load_config,
     resolve_target_tenants,
 )
-from tests.conftest import build_test_cfg
 
 
 def test_filesystem_target_resolution_in_tmp_path(tmp_path: Path):

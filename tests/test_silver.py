@@ -2,6 +2,7 @@ from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
+from conftest import build_test_cfg
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 from pyspark.sql.types import StringType, StructField, StructType, TimestampType
@@ -17,7 +18,6 @@ from saas_pipeline.silver.materials import (
     merge_dim_materials,
     transform_silver_materials,
 )
-from tests.conftest import build_test_cfg
 
 BRONZE_MATERIALS_SCHEMA = StructType(
     MATERIALS_RAW_SCHEMA.fields

@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pytest
+from conftest import build_test_cfg
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 
@@ -13,7 +14,6 @@ from saas_pipeline.common.quality_log import (
     build_quality_entry,
     evaluate_and_log_rules,
 )
-from tests.conftest import build_test_cfg
 
 
 def test_quality_engine_logs_and_warning(spark: SparkSession, tmp_path: Path):

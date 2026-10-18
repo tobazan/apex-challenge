@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from conftest import build_test_cfg
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 
@@ -7,7 +8,6 @@ from saas_pipeline.bronze.deliveries import ingest_deliveries_bronze
 from saas_pipeline.bronze.materials import ingest_materials_bronze
 from saas_pipeline.common.config import get_raw_path, get_target
 from saas_pipeline.common.delta import delta_exists, read_delta
-from tests.conftest import build_test_cfg
 
 
 def test_bronze_ingestion(spark: SparkSession, tmp_path: Path):

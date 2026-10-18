@@ -2,6 +2,7 @@ import shutil
 from pathlib import Path
 
 import pytest
+from conftest import build_test_cfg
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 
@@ -10,7 +11,6 @@ from saas_pipeline.bronze.materials import ingest_materials_bronze
 from saas_pipeline.cli import run_silver_layer
 from saas_pipeline.common.config import get_raw_path, get_target, resolve_target_tenants
 from saas_pipeline.common.delta import delta_exists, read_delta
-from tests.conftest import build_test_cfg
 
 
 # we use this decorator and configure pyproject.toml so standard pytest skips it
