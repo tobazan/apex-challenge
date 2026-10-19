@@ -17,7 +17,7 @@ def load_config(
     root = config_root or Path(__file__).resolve().parents[3] / "config"
 
     base_cfg = OmegaConf.load(root / "base.yaml")
-    env_path = root / "environments" / f"{env}.yaml"
+    env_path = root / "env" / f"{env}.yaml"
     env_cfg = OmegaConf.load(env_path) if env_path.exists() else OmegaConf.create({})
 
     tenant_cfg = OmegaConf.create({})
