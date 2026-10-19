@@ -13,11 +13,11 @@ def load_config(
     fail_on_critical: bool | None = None,
     config_root: Path | None = None,
 ) -> DictConfig:
-    """Loads and merges base.yaml -> environments/{env}.yaml -> tenants/{tenant}.yaml."""
+    """Loads and merges base.yaml -> env/{env}.yaml -> tenants/{tenant}.yaml."""
     root = config_root or Path(__file__).resolve().parents[3] / "config"
 
     base_cfg = OmegaConf.load(root / "base.yaml")
-    env_path = root / "environments" / f"{env}.yaml"
+    env_path = root / "env" / f"{env}.yaml"
     env_cfg = OmegaConf.load(env_path) if env_path.exists() else OmegaConf.create({})
 
     tenant_cfg = OmegaConf.create({})

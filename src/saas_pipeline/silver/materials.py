@@ -18,6 +18,8 @@ from saas_pipeline.common.quality_log import (
     evaluate_and_log_rules,
 )
 
+MATERIAL_PRICE_TYPE = DecimalType(18, 2)
+
 
 def transform_silver_materials(bronze_mat_df: DataFrame) -> tuple[DataFrame, DataFrame]:
     """Cleans, validates, and splits materials catalog into valid SCD2 rows and quarantined rows."""
@@ -29,7 +31,7 @@ def transform_silver_materials(bronze_mat_df: DataFrame) -> tuple[DataFrame, Dat
                 F.trim(F.col("material")),
             ).otherwise(F.lit(None)),
         )
-        .withColumn("_parsed_price", F.col("precio_base").cast(DecimalType(10, 2)))
+        .withColumn("_parsed_price", F.col("precio_base").cast(MATERIAL_PRICE_TYPE))
         .withColumn("_parsed_from", F.to_date(F.trim(F.col("valid_from")), "yyyy-MM-dd"))
         .withColumn("_parsed_to", F.to_date(F.trim(F.col("valid_to")), "yyyy-MM-dd"))
     )
@@ -46,6 +48,8 @@ def transform_silver_materials(bronze_mat_df: DataFrame) -> tuple[DataFrame, Dat
             | (F.col("_parsed_from") > F.col("_parsed_to")),
             F.lit("INVALID_DATE_INTERVAL"),
         ),
+        F.when(F.col("descripcion").isNull() | (F.trim(F.col("descripcion")) == ""), F.lit("NULL_DESCRIPTION")),
+        F.when(F.col("categoria").isNull() | (F.trim(F.col("categoria")) == ""), F.lit("NULL_CATEGORY")),
     )
     compact_reasons = F.array_compact(raw_reasons)
 
@@ -70,11 +74,36 @@ def transform_silver_materials(bronze_mat_df: DataFrame) -> tuple[DataFrame, Dat
             F.col("_source_file"),
             F.col("_batch_id"),
         )
-        .dropDuplicates(["material", "valid_from"])
     )
 
-    # Enforce strictly 1 is_current=True per SKU
-    w_latest = Window.partitionBy("material").orderBy(F.col("valid_from").desc())
+    # Keep the newest source record for a version key so MERGE receives one
+    # deterministic source row per (material, valid_from).
+    source_rank = Window.partitionBy("material", "valid_from").orderBy(
+        F.col("_ingestion_timestamp").desc_nulls_last(),
+        F.col("_source_file").desc_nulls_last(),
+        F.col("_batch_id").desc_nulls_last(),
+        F.sha2(
+            F.concat_ws(
+                "||",
+                F.coalesce(F.col("descripcion"), F.lit("")),
+                F.coalesce(F.col("categoria"), F.lit("")),
+                F.col("precio_base").cast("string"),
+                F.col("valid_to").cast("string"),
+            ),
+            256,
+        ).desc(),
+    )
+    valid_candidates_df = (
+        valid_candidates_df.withColumn("_source_rank", F.row_number().over(source_rank))
+        .filter(F.col("_source_rank") == 1)
+        .drop("_source_rank")
+    )
+
+    # Enforce strictly 1 is_current=True per SKU.
+    w_latest = Window.partitionBy("material").orderBy(
+        F.col("valid_from").desc(),
+        F.col("valid_to").desc(),
+    )
     valid_df = (
         valid_candidates_df.withColumn("_rn", F.row_number().over(w_latest))
         .withColumn(
@@ -128,8 +157,16 @@ def merge_dim_materials(
     else:
         write_delta(valid_mat_df, cfg, dim_target, mode="overwrite")
 
-    total_eval = valid_mat_df.count() + quarantine_mat_df.count()
-    q_fails = quarantine_mat_df.count()
+    evaluation_counts = (
+        valid_mat_df.select(F.lit("valid").alias("_classification"))
+        .unionByName(quarantine_mat_df.select(F.lit("quarantine").alias("_classification")))
+        .groupBy("_classification")
+        .count()
+        .collect()
+    )
+    counts_by_classification = {row["_classification"]: int(row["count"]) for row in evaluation_counts}
+    total_eval = sum(counts_by_classification.values())
+    q_fails = counts_by_classification.get("quarantine", 0)
 
     pre_entries = [
         build_quality_entry(

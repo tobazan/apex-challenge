@@ -70,7 +70,7 @@ def test_filesystem_target_resolution_in_tmp_path(tmp_path: Path):
 
 def test_hierarchical_yaml_merge_and_cli_overrides(tmp_path: Path):
     cfg_root = tmp_path / "config"
-    (cfg_root / "environments").mkdir(parents=True)
+    (cfg_root / "env").mkdir(parents=True)
     (cfg_root / "tenants").mkdir(parents=True)
 
     (cfg_root / "base.yaml").write_text(
@@ -82,7 +82,7 @@ def test_hierarchical_yaml_merge_and_cli_overrides(tmp_path: Path):
         "rules:\n  cs_to_st_factor: 20\n",
         encoding="utf-8",
     )
-    (cfg_root / "environments" / "qa.yaml").write_text(
+    (cfg_root / "env" / "qa.yaml").write_text(
         "environment: qa\nexecution:\n  fail_fast: true\nquality:\n  fail_on_critical: true\n",
         encoding="utf-8",
     )

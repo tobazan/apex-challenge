@@ -1,7 +1,7 @@
 from omegaconf import DictConfig
-from pyspark.sql import DataFrame, SparkSession
+from pyspark.sql import DataFrame, SparkSession, Window
 from pyspark.sql import functions as F
-from pyspark.sql.types import DecimalType, LongType
+from pyspark.sql.types import DecimalType, IntegerType, LongType
 
 from saas_pipeline.common.config import get_target
 from saas_pipeline.common.delta import (
@@ -11,9 +11,12 @@ from saas_pipeline.common.delta import (
     write_delta,
 )
 from saas_pipeline.common.quality_log import (
-    QualityRule,
     build_quality_entry,
     evaluate_and_log_rules,
+)
+from saas_pipeline.silver.delivery_quality_rules import (
+    build_delivery_quarantine_reason,
+    build_silver_delivery_quality_rules,
 )
 
 BUSINESS_DEDUP_COLS = [
@@ -27,6 +30,9 @@ BUSINESS_DEDUP_COLS = [
     "cantidad",
     "unidad",
 ]
+PRICE_TYPE = DecimalType(18, 2)
+QUANTITY_PARSE_TYPE = DecimalType(18, 4)
+QUANTITY_TYPE = IntegerType()
 
 
 def split_and_enrich_deliveries(
@@ -41,17 +47,26 @@ def split_and_enrich_deliveries(
     3. Evaluates anomalies and temp SCD2 join against dim_materials
     Returns: (valid_enriched_df, quarantine_df, dups_dropped, discarded_count)
     """
-    raw_count = bronze_df.count()
     dedup_df = bronze_df.dropDuplicates(BUSINESS_DEDUP_COLS)
-    after_dedup_count = dedup_df.count()
-    duplicates_dropped = raw_count - after_dedup_count
 
     routine_types = list(cfg.rules.routine_delivery_types)
     bonus_types = list(cfg.rules.bonus_delivery_types)
     valid_delivery_types = routine_types + bonus_types
 
     kept_df = dedup_df.filter(F.trim(F.col("tipo_entrega")).isin(valid_delivery_types))
-    after_discard_count = kept_df.count()
+    counts = (
+        bronze_df.select(F.lit("raw").alias("_stage"))
+        .unionByName(dedup_df.select(F.lit("deduplicated").alias("_stage")))
+        .unionByName(kept_df.select(F.lit("kept").alias("_stage")))
+        .groupBy("_stage")
+        .count()
+        .collect()
+    )
+    count_by_stage = {row["_stage"]: int(row["count"]) for row in counts}
+    raw_count = count_by_stage.get("raw", 0)
+    after_dedup_count = count_by_stage.get("deduplicated", 0)
+    after_discard_count = count_by_stage.get("kept", 0)
+    duplicates_dropped = raw_count - after_dedup_count
     discarded_count = after_dedup_count - after_discard_count
 
     # Parse candidate types for validation
@@ -63,8 +78,8 @@ def split_and_enrich_deliveries(
                 F.to_date(F.col("fecha_proceso"), "yyyyMMdd"),
             ).otherwise(F.lit(None)),
         )
-        .withColumn("_parsed_qty", F.col("cantidad").cast(DecimalType(12, 2)))
-        .withColumn("_parsed_price", F.col("precio").cast(DecimalType(12, 2)))
+        .withColumn("_parsed_qty_decimal", F.col("cantidad").cast(QUANTITY_PARSE_TYPE))
+        .withColumn("_parsed_price", F.col("precio").cast(PRICE_TYPE))
     )
 
     # Temporal join with SCD2 dim_materials using broadcast
@@ -98,27 +113,9 @@ def split_and_enrich_deliveries(
         how="left",
     )
 
-    # Build quarantine reasons array
-    raw_reasons = F.array(
-        F.when(F.col("_parsed_date").isNull(), F.lit("INVALID_FECHA_PROCESO")),
-        F.when(
-            F.col("_parsed_qty").isNull() | (F.col("_parsed_qty") <= 0),
-            F.lit("INVALID_CANTIDAD"),
-        ),
-        F.when(
-            F.col("_parsed_price").isNull() | (F.col("_parsed_price") <= 0),
-            F.lit("INVALID_PRECIO"),
-        ),
-        F.when(
-            F.col("_cat_sku").isNull() | (F.col("_parsed_date").isNotNull() & F.col("_dim_material").isNull()),
-            F.lit("UNMAPPED_MATERIAL"),
-        ),
-    )
-    compact_reasons = F.array_compact(raw_reasons)
-
     evaluated_df = joined_df.withColumn(
         "_quarantine_reason",
-        F.when(F.size(compact_reasons) > 0, F.concat_ws("|", compact_reasons)).otherwise(F.lit(None)),
+        build_delivery_quarantine_reason(),
     )
 
     # Split Quarantine / Valid
@@ -135,14 +132,14 @@ def split_and_enrich_deliveries(
         .withColumn("tipo_entrega", F.trim(F.col("tipo_entrega")))
         .withColumn("material", F.trim(F.col("material")))
         .withColumn("precio", F.col("_parsed_price"))
-        .withColumn("cantidad_original", F.col("_parsed_qty"))
+        .withColumn("cantidad_original", F.col("_parsed_qty_decimal").cast(QUANTITY_TYPE))
         .withColumn("unidad_original", F.upper(F.trim(F.col("unidad"))))
         .withColumn(
             "cantidad_normalizada_st",
             F.when(
                 F.col("unidad_original") == "CS",
-                (F.col("_parsed_qty") * F.lit(cs_factor)).cast(DecimalType(12, 2)),
-            ).otherwise(F.col("_parsed_qty")),
+                (F.col("cantidad_original") * F.lit(cs_factor)).cast(QUANTITY_TYPE),
+            ).otherwise(F.col("cantidad_original")),
         )
         .withColumn("unidad_normalizada", F.lit("ST"))
         .withColumn("is_routine_delivery", F.col("tipo_entrega").isin(routine_types))
@@ -169,8 +166,21 @@ def split_and_enrich_deliveries(
             "_tenant_id",
             "_batch_id",
         )
-        # Deduplicate on composite key in case source had same key with different metadata
-        .dropDuplicates(["tenant_id", "fecha_proceso", "transporte", "ruta", "material", "tipo_entrega"])
+    )
+
+    # Keep one deterministic record per Silver merge key
+    # Makes sense even when temporal join with SCD2 dim_materials is used?
+    delivery_key = ["tenant_id", "fecha_proceso", "transporte", "ruta", "material", "tipo_entrega"]
+    delivery_rank = Window.partitionBy(*delivery_key).orderBy(
+        F.col("_ingestion_timestamp").desc_nulls_last(),
+        F.col("_source_file").desc_nulls_last(),
+        F.col("_batch_id").desc_nulls_last(),
+        F.sha2(F.to_json(F.struct(*[F.col(column) for column in valid_df.columns])), 256).desc(),
+    )
+    valid_df = (
+        valid_df.withColumn("_source_rank", F.row_number().over(delivery_rank))
+        .filter(F.col("_source_rank") == 1)
+        .drop("_source_rank")
     )
 
     return valid_df, quarantine_df, duplicates_dropped, discarded_count
@@ -238,10 +248,38 @@ def process_silver_deliveries_for_tenant(spark: SparkSession, tenant: str, cfg: 
         )
 
     # Evaluate and log Silver DQ checks, count anomalies found during quarantine routing
-    total_evaluated = valid_df.count() + quarantine_df.count()
-    q_date_fails = quarantine_df.filter(F.col("_quarantine_reason").contains("INVALID_FECHA_PROCESO")).count()
-    q_qty_fails = quarantine_df.filter(F.col("_quarantine_reason").contains("INVALID_CANTIDAD")).count()
-    q_mat_fails = quarantine_df.filter(F.col("_quarantine_reason").contains("UNMAPPED_MATERIAL")).count()
+    evaluation_metrics = (
+        valid_df.select(
+            F.lit("valid").alias("_classification"),
+            F.lit(0).cast("long").alias("_invalid_dates"),
+            F.lit(0).cast("long").alias("_invalid_quantities"),
+            F.lit(0).cast("long").alias("_unmapped_materials"),
+        )
+        .unionByName(
+            quarantine_df.select(
+                F.lit("quarantine").alias("_classification"),
+                F.col("_quarantine_reason").contains("INVALID_FECHA_PROCESO").cast("long").alias("_invalid_dates"),
+                F.col("_quarantine_reason").contains("INVALID_CANTIDAD").cast("long").alias("_invalid_quantities"),
+                F.col("_quarantine_reason").contains("UNMAPPED_MATERIAL").cast("long").alias("_unmapped_materials"),
+            )
+        )
+        .groupBy("_classification")
+        .agg(
+            F.count(F.lit(1)).alias("records"),
+            F.sum("_invalid_dates").alias("invalid_dates"),
+            F.sum("_invalid_quantities").alias("invalid_quantities"),
+            F.sum("_unmapped_materials").alias("unmapped_materials"),
+        )
+        .collect()
+    )
+    metrics_by_classification = {row["_classification"]: row for row in evaluation_metrics}
+    valid_count = int(metrics_by_classification.get("valid")["records"]) if "valid" in metrics_by_classification else 0
+    quarantine_metrics = metrics_by_classification.get("quarantine")
+    total_quarantined = int(quarantine_metrics["records"]) if quarantine_metrics else 0
+    total_evaluated = valid_count + total_quarantined
+    q_date_fails = int(quarantine_metrics["invalid_dates"] or 0) if quarantine_metrics else 0
+    q_qty_fails = int(quarantine_metrics["invalid_quantities"] or 0) if quarantine_metrics else 0
+    q_mat_fails = int(quarantine_metrics["unmapped_materials"] or 0) if quarantine_metrics else 0
 
     batch_uid = f"{run_id}_silver_{tenant}"
     pre_merge_entries = [
@@ -304,31 +342,12 @@ def process_silver_deliveries_for_tenant(spark: SparkSession, tenant: str, cfg: 
 
     # Critical post-merge DQ checks on Silver
     silver_final_df = read_delta(spark, cfg, silver_target)
-    critical_silver_rules = [
-        QualityRule(
-            name="silver_valid_fecha_proceso_not_null",
-            severity="critical",
-            valid_condition=F.col("fecha_proceso").isNotNull(),
-        ),
-        QualityRule(
-            name="silver_positive_normalized_quantity_st",
-            severity="critical",
-            valid_condition=F.col("cantidad_normalizada_st").isNotNull()
-            & (F.col("cantidad_normalizada_st") > 0)
-            & (F.col("unidad_normalizada") == "ST"),
-        ),
-        QualityRule(
-            name="silver_scd2_catalog_referential_integrity",
-            severity="critical",
-            valid_condition=F.col("material_descripcion").isNotNull() & F.col("material_precio_base").isNotNull(),
-        ),
-        QualityRule(
-            name="silver_valid_delivery_type_flags",
-            severity="critical",
-            valid_condition=F.col("tipo_entrega").isin(["ZPRE", "ZVE1", "Z04", "Z05"])
-            & (F.col("is_routine_delivery") != F.col("is_bonus_delivery")),
-        ),
-    ]
+    routine_types = list(cfg.rules.routine_delivery_types)
+    bonus_types = list(cfg.rules.bonus_delivery_types)
+    critical_silver_rules = build_silver_delivery_quality_rules(
+        routine_delivery_types=routine_types,
+        bonus_delivery_types=bonus_types,
+    )
 
     evaluate_and_log_rules(
         df=silver_final_df,

@@ -8,6 +8,7 @@ from saas_pipeline.bronze.deliveries import ingest_deliveries_bronze
 from saas_pipeline.bronze.materials import ingest_materials_bronze
 from saas_pipeline.common.config import load_config, resolve_target_tenants
 from saas_pipeline.common.spark import get_spark_session
+from saas_pipeline.gold.daily_metrics_by_delivery_type import daily_metrics_by_delivery_type
 from saas_pipeline.silver.deliveries import process_silver_deliveries_for_tenant
 from saas_pipeline.silver.materials import process_silver_materials
 
@@ -38,6 +39,24 @@ def run_silver_layer(spark: SparkSession, cfg: DictConfig, run_id: str) -> None:
     if errors:
         failed_list = ", ".join([f"{t}: {e}" for t, e in errors])
         raise RuntimeError(f"Silver layer completed with errors on tenant(s): {failed_list}")
+
+
+def run_gold_layer(spark: SparkSession, cfg: DictConfig, run_id: str) -> None:
+    tenants = resolve_target_tenants(cfg)
+    errors: list[tuple[str, Exception]] = []
+    for tenant in tenants:
+        try:
+            click.echo(f"[GOLD] Computing daily metrics for tenant='{tenant}' (run_id={run_id})...")
+            daily_metrics_by_delivery_type(spark, tenant, cfg, run_id=run_id)
+        except Exception as exc:
+            click.echo(f"[GOLD] ERROR on tenant='{tenant}': {exc}", err=True)
+            if cfg.execution.fail_fast:
+                raise
+            errors.append((tenant, exc))
+
+    if errors:
+        failed_list = ", ".join([f"{t}: {e}" for t, e in errors])
+        raise RuntimeError(f"Gold layer completed with errors on tenant(s): {failed_list}")
 
 
 @click.command()
@@ -93,6 +112,8 @@ def main(
         run_bronze_layer(spark, cfg, run_id)
     if layer in ("silver", "all"):
         run_silver_layer(spark, cfg, run_id)
+    if layer in ("gold", "all"):
+        run_gold_layer(spark, cfg, run_id)
 
 
 if __name__ == "__main__":

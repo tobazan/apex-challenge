@@ -171,7 +171,7 @@ executed_at TIMESTAMP
 ```text
 ├── config/
 │   ├── base.yaml                    # Base schema, tenant lists, business rules
-│   └── environments/
+│   └── env/
 │       ├── dev.yaml                 # Local sandbox paths, fail_on_critical=false
 │       ├── qa.yaml                  # Staging configs, fail_on_critical=true
 │       └── main.yaml                # Production paths & strict quality gates
@@ -201,6 +201,7 @@ executed_at TIMESTAMP
 │       │
 │       └── silver/                  # Silver transformation & master data
 │           ├── deliveries.py        # Deduplication, quarantine, temporal join, fact merge
+│           ├── delivery_quality_rules.py
 │           └── materials.py         # SCD Type 2 merge & catalog quarantine
 │
 ├── tests/
@@ -292,3 +293,8 @@ The pipeline is intentionally built without proprietary vendor dependencies:
    - Validates multi-environment OmegaConf (`dev`, `qa`, `main`).
    - Runs the isolated unit test suite on Linux GH runner.
 2. **Databricks Deployment**:
+   - The local filesystem runtime is implemented and tested.
+   - Databricks/Unity Catalog paths are scaffolded in configuration, while
+     Terraform provisioning, Azure cloud and DAB bundle deployment remain follow-up work.
+     See [`docs/tenant-onboarding-terraform.md`](docs/tenant-onboarding-terraform.md)
+     for the onboarding approach.
