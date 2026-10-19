@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
 
@@ -13,6 +13,7 @@ from saas_pipeline.common.config import get_target
 from saas_pipeline.common.delta import delta_exists, read_delta, write_delta
 from saas_pipeline.silver.deliveries import (
     process_silver_deliveries_for_tenant,
+    split_and_enrich_deliveries,
 )
 from saas_pipeline.silver.materials import (
     merge_dim_materials,
@@ -92,6 +93,84 @@ def test_merge_dim_materials_scd2_and_quarantine(spark: SparkSession, tmp_path: 
     qlogs_df = read_delta(spark, cfg, get_target(cfg, "quality_logs"))
     shared_logs = qlogs_df.filter((F.col("table_name") == "dim_materials") & (F.col("tenant_id") == "shared"))
     assert shared_logs.count() == 6  # 3 checks * 2 runs
+
+
+def test_silver_delivery_key_keeps_latest_source_record(spark: SparkSession, tmp_path: Path):
+    cfg = build_test_cfg(tmp_path)
+    dim_data = [
+        ("SKU1", "Cola", "Soda", "10.00", "2024-01-01", "9999-12-31", "true", None, "catalog", "b1"),
+    ]
+    dim_df, _ = transform_silver_materials(spark.createDataFrame(dim_data, schema=BRONZE_MATERIALS_SCHEMA))
+
+    delivery_data = [
+        (
+            "sv",
+            "20250315",
+            "101",
+            "201",
+            "ZPRE",
+            "SKU1",
+            "11.00",
+            "2",
+            "ST",
+            datetime(2025, 3, 15, 8),
+            "f1",
+            "sv",
+            "b1",
+        ),
+        (
+            "sv",
+            "20250315",
+            "101",
+            "201",
+            "ZPRE",
+            "SKU1",
+            "12.00",
+            "2",
+            "ST",
+            datetime(2025, 3, 15, 9),
+            "f2",
+            "sv",
+            "b2",
+        ),
+    ]
+    bronze_df = spark.createDataFrame(delivery_data, schema=BRONZE_DELIVERIES_SCHEMA)
+
+    valid_df, quarantine_df, duplicates_dropped, discarded_count = split_and_enrich_deliveries(
+        bronze_df, dim_df, cfg
+    )
+
+    row = valid_df.first()
+    assert quarantine_df.isEmpty()
+    assert duplicates_dropped == 0
+    assert discarded_count == 0
+    assert row["precio"] == Decimal("12.00")
+    assert row["cantidad_original"] == 2
+    assert valid_df.schema["precio"].dataType.simpleString() == "decimal(18,2)"
+    assert valid_df.schema["cantidad_original"].dataType.simpleString() == "int"
+
+    fractional_data = [
+        (
+            "sv",
+            "20250315",
+            "102",
+            "202",
+            "ZPRE",
+            "SKU1",
+            "11.00",
+            "2.125",
+            "ST",
+            datetime(2025, 3, 15, 10),
+            "f3",
+            "sv",
+            "b3",
+        ),
+    ]
+    fractional_df = spark.createDataFrame(fractional_data, schema=BRONZE_DELIVERIES_SCHEMA)
+    _, fractional_quarantine, _, _ = split_and_enrich_deliveries(fractional_df, dim_df, cfg)
+    fractional_row = fractional_quarantine.first()
+    assert fractional_row is not None
+    assert fractional_row["_quarantine_reason"] == "INVALID_CANTIDAD"
 
 
 def test_silver_deliveries_transformation(spark: SparkSession, tmp_path: Path):
